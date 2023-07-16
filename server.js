@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const { check, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const { Pool } = require('pg');
 
 const User = require('./models/user');
 
@@ -20,6 +21,14 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
+
+const pool = new Pool({
+    user: 'postgres',
+    host: 'localhost',
+    database: 'tickdata',
+    password: 'your_password',
+    port: 5432,
+});
 
 app.post('/register', [
     check('username').notEmpty().withMessage('Username is required'),
@@ -80,8 +89,6 @@ app.post('/login', async (req, res) => {
     }
 });
 
-// ... previous code
-
 app.get('/profile', async (req, res) => {
     try {
         const user = await User.findById(req.userId);
@@ -119,4 +126,22 @@ app.put('/profile', async (req, res) => {
     }
 });
 
-// ... rest of the code
+app.get('/api/tickdata', async (req, res) => {
+    const { symbol, startTime, endTime } = req.query;
+
+    try {
+        const result = await pool.query(
+            'SELECT * FROM $1 WHERE timestamp BETWEEN $2 AND $3 ORDER BY timestamp',
+            [symbol, startTime, endTime]
+        );
+
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'An error occurred while fetching tick data' });
+    }
+});
+
+app.listen(4000, () => {
+    console.log("Server Has Started 4000");
+});
