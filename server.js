@@ -80,4 +80,43 @@ app.post('/login', async (req, res) => {
     }
 });
 
+// ... previous code
+
+app.get('/profile', async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+
+        if (!user) {
+            return res.status(400).json({ message: 'User not found' });
+        }
+
+        res.json({ fullName: user.fullName, bio: user.bio });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.put('/profile', async (req, res) => {
+    try {
+        const { fullName, bio } = req.body;
+
+        const user = await User.findById(req.userId);
+
+        if (!user) {
+            return res.status(400).json({ message: 'User not found' });
+        }
+
+        user.fullName = fullName;
+        user.bio = bio;
+
+        await user.save();
+
+        res.json({ message: 'Profile updated successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
 // ... rest of the code
