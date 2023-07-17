@@ -1,5 +1,4 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { check, validationResult } = require('express-validator');
@@ -7,7 +6,13 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { Pool } = require('pg');
 
-const User = require('./models/user');
+const pool = new Pool({
+    user: 'postgres',
+    host: 'localhost',
+    database: 'users',
+    password: '2gH10X09postgres',
+    port: 5432,
+});
 
 const app = express();
 
@@ -22,14 +27,6 @@ const limiter = rateLimit({
 
 app.use(limiter);
 
-const pool = new Pool({
-    user: 'postgres',
-    host: 'localhost',
-    database: 'tickdata',
-    password: 'your_password',
-    port: 5432,
-});
-
 app.post('/register', [
     check('username').notEmpty().withMessage('Username is required'),
     check('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters long'),
@@ -42,20 +39,15 @@ app.post('/register', [
     try {
         const { username, password } = req.body;
 
-        const existingUser = await User.findOne({ username });
+        const existingUser = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
 
-        if (existingUser) {
+        if (existingUser.rows.length > 0) {
             return res.status(400).json({ message: 'Username already exists' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const user = new User({
-            username,
-            password: hashedPassword,
-        });
-
-        await user.save();
+        await pool.query('INSERT INTO users (username, password) VALUES ($1, $2)', [username, hashedPassword]);
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (err) {
@@ -68,19 +60,19 @@ app.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        const user = await User.findOne({ username });
+        const user = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
 
-        if (!user) {
+        if (user.rows.length === 0) {
             return res.status(400).json({ message: 'Invalid username or password' });
         }
 
-        const validPassword = await bcrypt.compare(password, user.password);
+        const validPassword = await bcrypt.compare(password, user.rows[0].password);
 
         if (!validPassword) {
             return res.status(400).json({ message: 'Invalid username or password' });
         }
 
-        const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ userId: user.rows[0].id }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
         res.json({ token });
     } catch (err) {
@@ -91,13 +83,13 @@ app.post('/login', async (req, res) => {
 
 app.get('/profile', async (req, res) => {
     try {
-        const user = await User.findById(req.userId);
+        const user = await pool.query('SELECT * FROM users WHERE id = $1', [req.userId]);
 
-        if (!user) {
+        if (user.rows.length === 0) {
             return res.status(400).json({ message: 'User not found' });
         }
 
-        res.json({ fullName: user.fullName, bio: user.bio });
+        res.json({ fullName: user.rows[0].fullName, bio: user.rows[0].bio });
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Server error' });
@@ -108,16 +100,13 @@ app.put('/profile', async (req, res) => {
     try {
         const { fullName, bio } = req.body;
 
-        const user = await User.findById(req.userId);
+        const user = await pool.query('SELECT * FROM users WHERE id = $1', [req.userId]);
 
-        if (!user) {
+        if (user.rows.length === 0) {
             return res.status(400).json({ message: 'User not found' });
         }
 
-        user.fullName = fullName;
-        user.bio = bio;
-
-        await user.save();
+        await pool.query('UPDATE users SET fullName = $1, bio = $2 WHERE id = $3', [fullName, bio, req.userId]);
 
         res.json({ message: 'Profile updated successfully' });
     } catch (err) {
