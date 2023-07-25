@@ -5,6 +5,10 @@ const { check, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { Pool } = require('pg');
+const dotenv = require('dotenv').config();
+const path = require('path');
+const cors = require('cors');
+
 
 const pool = new Pool({
     user: 'postgres',
@@ -16,8 +20,17 @@ const pool = new Pool({
 
 const app = express();
 
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, 'frontend/public')));
+
 app.use(express.json());
 app.use(helmet());
+
+app.use(cors({
+    origin: 'http://localhost:3000',
+    credentials: true,
+    optionsSuccessStatus: 200
+}));
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -26,6 +39,24 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
+
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token == null) {
+        return res.sendStatus(401); // if there isn't any token
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.sendStatus(401);
+        }
+
+        req.userId = user.userId;
+        next(); // pass the execution off to whatever request the client intended
+    });
+}
 
 app.post('/register', [
     check('username').notEmpty().withMessage('Username is required'),
@@ -81,7 +112,7 @@ app.post('/login', async (req, res) => {
     }
 });
 
-app.get('/profile', async (req, res) => {
+app.get('/profile', authenticateToken, async (req, res) => {
     try {
         const user = await pool.query('SELECT * FROM users WHERE id = $1', [req.userId]);
 
@@ -96,7 +127,7 @@ app.get('/profile', async (req, res) => {
     }
 });
 
-app.put('/profile', async (req, res) => {
+app.put('/profile', authenticateToken, async (req, res) => {
     try {
         const { fullName, bio } = req.body;
 
@@ -115,13 +146,18 @@ app.put('/profile', async (req, res) => {
     }
 });
 
-app.get('/api/tickdata', async (req, res) => {
+app.get('/api/tickdata', authenticateToken, async (req, res) => {
     const { symbol, startTime, endTime } = req.query;
+
+    // Check if symbol is a valid table name
+    if (!/^\w+$/.test(symbol)) {
+        return res.status(400).json({ error: 'Invalid symbol' });
+    }
 
     try {
         const result = await pool.query(
-            'SELECT * FROM $1 WHERE timestamp BETWEEN $2 AND $3 ORDER BY timestamp',
-            [symbol, startTime, endTime]
+            `SELECT * FROM ${symbol} WHERE timestamp BETWEEN $1 AND $2 ORDER BY timestamp`,
+            [startTime, endTime]
         );
 
         res.json(result.rows);
@@ -129,6 +165,12 @@ app.get('/api/tickdata', async (req, res) => {
         console.error(err);
         res.status(500).json({ error: 'An error occurred while fetching tick data' });
     }
+});
+
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'frontend/public', 'index.html'));
 });
 
 app.listen(4000, () => {
