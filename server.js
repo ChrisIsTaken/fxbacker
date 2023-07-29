@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const { Pool } = require('pg');
 const dotenv = require('dotenv').config();
+console.log(process.env.JWT_SECRET);
 const path = require('path');
 const cors = require('cors');
 
@@ -167,9 +168,19 @@ app.get('/api/tickdata', authenticateToken, async (req, res) => {
     }
 });
 
+app.get('/symbols', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT DISTINCT symbol FROM tickdata');
+        res.json(result.rows.map(row => row.symbol));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
 // The "catchall" handler: for any request that doesn't
 // match one above, send back React's index.html file.
-app.get('*', (req, res) => {
+app.get('*', (req, res) =>
     res.sendFile(path.join(__dirname, 'frontend/public', 'index.html'));
 });
 
